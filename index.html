@@ -1,0 +1,381 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BrowserVM</title>
+
+<script src="https://cdn.jsdelivr.net/gh/copy/v86@master/build/libv86.js"></script>
+
+<style>
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: #090d16;
+  color: #e8edf7;
+  font-family: Arial, sans-serif;
+}
+
+header {
+  height: 65px;
+  padding: 18px 25px;
+  background: #111827;
+  border-bottom: 1px solid #273449;
+  display: flex;
+  justify-content: space-between;
+}
+
+.logo {
+  font-size: 21px;
+  font-weight: bold;
+  color: #60a5fa;
+}
+
+main {
+  max-width: 1000px;
+  margin: 35px auto;
+  padding: 15px;
+}
+
+.panel {
+  background: #111827;
+  border: 1px solid #273449;
+  border-radius: 12px;
+  padding: 22px;
+  margin-bottom: 20px;
+}
+
+h2 { margin-top: 0; }
+
+.upload {
+  border: 2px dashed #3b82f6;
+  border-radius: 10px;
+  padding: 35px 15px;
+  text-align: center;
+  cursor: pointer;
+  background: #172338;
+}
+
+.upload:hover { background: #203452; }
+
+input, select {
+  margin-top: 12px;
+  padding: 10px;
+  background: #202d40;
+  color: white;
+  border: 1px solid #40516b;
+  border-radius: 7px;
+  width: 100%;
+}
+
+button {
+  border: 0;
+  border-radius: 7px;
+  padding: 12px 20px;
+  margin: 5px;
+  cursor: pointer;
+  font-weight: bold;
+  background: #2563eb;
+  color: white;
+}
+
+button:hover { filter: brightness(1.2); }
+button:disabled { opacity: .4; cursor: not-allowed; }
+
+.green { background: #15803d; }
+.red { background: #b91c1c; }
+.gray { background: #374151; }
+
+#status {
+  color: #93c5fd;
+  margin-top: 15px;
+}
+
+#screen-container {
+  width: 100%;
+  min-height: 400px;
+  background: black;
+  overflow: auto;
+  border-radius: 8px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+#screen-container canvas {
+  max-width: 100%;
+  height: auto;
+}
+
+#screen-container div {
+  white-space: pre;
+  font: 14px monospace;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+small { color: #94a3b8; }
+
+footer {
+  text-align: center;
+  color: #64748b;
+  padding: 25px;
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <div class="logo">◈ BrowserVM</div>
+  <div>Virtual Computer</div>
+</header>
+
+<main>
+
+  <div class="panel">
+    <h2>Virtual Machine Launcher</h2>
+    <p>Load a compatible operating system image and boot it in your browser.</p>
+
+    <label for="disk">Image type</label>
+    <select id="disk">
+      <option value="cdrom">ISO / CD-ROM image</option>
+      <option value="hda">IMG / Raw hard disk image</option>
+    </select>
+
+    <label class="upload" id="dropzone">
+      <div style="font-size:40px">📀</div>
+      <h3>Upload OS Image</h3>
+      <p>Click or drag an image file here</p>
+      <small>ISO, IMG and compatible raw images</small>
+      <input type="file" id="file" accept=".iso,.img,.bin" />
+    </label>
+
+    <p id="filename">No image selected</p>
+
+    <div class="controls">
+      <button class="green" id="run">▶ RUN</button>
+      <button class="red" id="stop" disabled>■ STOP</button>
+      <button class="gray" id="reset" disabled>↻ RESET</button>
+    </div>
+
+    <div id="status">Ready. Select an operating system image.</div>
+  </div>
+
+  <div class="panel">
+    <h2>Virtual Computer</h2>
+    <div id="screen-container">
+      <div style="color:#64748b">
+        BROWSER VM
+        Waiting for operating system...
+      </div>
+    </div>
+
+    <div class="controls">
+      <button id="fullscreen">⛶ Fullscreen</button>
+    </div>
+
+    <small>
+      Click inside the virtual computer to use your keyboard.
+      Press ESC to leave fullscreen.
+    </small>
+  </div>
+
+  <div class="panel">
+    <h2>Virtual Hardware</h2>
+    <p>Architecture: x86 / PC</p>
+    <p>Memory: 256 MB</p>
+    <p>Graphics memory: 8 MB</p>
+    <p>Emulator: v86</p>
+    <small>Hardware settings are fixed in this starter version.</small>
+  </div>
+
+</main>
+
+<footer>BrowserVM · Browser-based PC emulator</footer>
+
+<script>
+let emulator = null;
+let selectedFile = null;
+let running = false;
+
+const fileInput = document.getElementById("file");
+const filename = document.getElementById("filename");
+const status = document.getElementById("status");
+const screen = document.getElementById("screen-container");
+const runButton = document.getElementById("run");
+const stopButton = document.getElementById("stop");
+const resetButton = document.getElementById("reset");
+
+function setStatus(message) {
+  status.textContent = message;
+}
+
+function selectFile(file) {
+  if (!file) return;
+
+  const ext = file.name.split(".").pop().toLowerCase();
+
+  if (!["iso", "img", "bin"].includes(ext)) {
+    setStatus("Unsupported file extension.");
+    return;
+  }
+
+  selectedFile = file;
+  filename.textContent =
+    "Selected: " + file.name +
+    " (" + (file.size / 1024 / 1024).toFixed(1) + " MB)";
+
+  document.getElementById("disk").value =
+    ext === "iso" ? "cdrom" : "hda";
+
+  setStatus("Image ready to boot.");
+}
+
+fileInput.addEventListener("change", e => {
+  selectFile(e.target.files[0]);
+});
+
+const dropzone = document.getElementById("dropzone");
+
+dropzone.addEventListener("dragover", e => {
+  e.preventDefault();
+  dropzone.style.background = "#29476d";
+});
+
+dropzone.addEventListener("dragleave", () => {
+  dropzone.style.background = "";
+});
+
+dropzone.addEventListener("drop", e => {
+  e.preventDefault();
+  dropzone.style.background = "";
+  selectFile(e.dataTransfer.files[0]);
+});
+
+async function startVM() {
+  if (!selectedFile) {
+    setStatus("Please select an OS image first.");
+    return;
+  }
+
+  if (typeof V86Starter === "undefined") {
+    setStatus("Emulator library failed to load. Check network access.");
+    return;
+  }
+
+  runButton.disabled = true;
+  setStatus("Loading operating system image...");
+
+  try {
+    if (emulator) {
+      emulator.stop();
+      emulator = null;
+    }
+
+    screen.innerHTML = "";
+
+    const buffer = new Uint8Array(
+      await selectedFile.arrayBuffer()
+    );
+
+    const imageType = document.getElementById("disk").value;
+
+    const config = {
+      wasm_path:
+        "https://cdn.jsdelivr.net/gh/copy/v86@master/build/v86.wasm",
+
+      memory_size: 256 * 1024 * 1024,
+      vga_memory_size: 8 * 1024 * 1024,
+
+      screen_container: screen,
+
+      bios: {
+        url: "https://cdn.jsdelivr.net/gh/copy/v86@master/bios/seabios.bin"
+      },
+
+      vga_bios: {
+        url: "https://cdn.jsdelivr.net/gh/copy/v86@master/bios/vgabios.bin"
+      },
+
+      autostart: true
+    };
+
+    config[imageType] = { buffer };
+
+    emulator = new V86Starter(config);
+
+    emulator.add_listener("emulator-ready", () => {
+      running = true;
+      setStatus("Virtual machine is ready.");
+      stopButton.disabled = false;
+      resetButton.disabled = false;
+      runButton.disabled = false;
+    });
+
+    emulator.add_listener("emulator-started", () => {
+      setStatus("Virtual machine started. Booting OS...");
+    });
+
+    emulator.add_listener("download-progress", progress => {
+      if (progress.total) {
+        setStatus(
+          "Loading emulator: " +
+          Math.round(progress.loaded / progress.total * 100) +
+          "%"
+        );
+      }
+    });
+
+  } catch (error) {
+    console.error(error);
+    setStatus("Error: " + error.message);
+    runButton.disabled = false;
+  }
+}
+
+function stopVM() {
+  if (emulator) {
+    emulator.stop();
+    running = false;
+    setStatus("Virtual machine stopped.");
+    stopButton.disabled = true;
+    resetButton.disabled = true;
+    runButton.disabled = false;
+  }
+}
+
+async function resetVM() {
+  if (!emulator || !running) return;
+
+  setStatus("Restarting virtual machine...");
+
+  try {
+    await emulator.restart();
+  } catch (error) {
+    setStatus("Restart failed: " + error.message);
+  }
+}
+
+runButton.addEventListener("click", startVM);
+stopButton.addEventListener("click", stopVM);
+resetButton.addEventListener("click", resetVM);
+
+document.getElementById("fullscreen")
+.addEventListener("click", () => {
+  const target = document.querySelector("#screen-container");
+
+  if (target.requestFullscreen) {
+    target.requestFullscreen();
+  }
+});
+</script>
+
+</body>
+</html>
